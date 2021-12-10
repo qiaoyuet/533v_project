@@ -6,6 +6,10 @@ from utils.boolmask import mask_long2bool, mask_long_scatter
 class StateTSPTW(NamedTuple):
     # Fixed input
     loc: torch.Tensor
+    tw_center: torch.Tensor
+    tw_width: torch.Tensor
+    tw_lb: torch.Tensor
+    tw_ub: torch.Tensor
     dist: torch.Tensor
 
     # If this state contains multiple copies (i.e. beam search) for the same instance, then for memory efficiency
@@ -39,12 +43,21 @@ class StateTSPTW(NamedTuple):
         )
 
     @staticmethod
-    def initialize(loc, visited_dtype=torch.uint8):
+    def initialize(input, visited_dtype=torch.uint8):
+        loc = input['loc']
+        tw_center = input['tw_center']
+        tw_width = input['tw_width']
+        tw_lb = input['tw_lb']
+        tw_ub = input['tw_ub']
 
         batch_size, n_loc, _ = loc.size()
         prev_a = torch.zeros(batch_size, 1, dtype=torch.long, device=loc.device)
         return StateTSPTW(
             loc=loc,
+            tw_center=tw_center,
+            tw_width=tw_width,
+            tw_lb=tw_lb,
+            tw_ub=tw_ub,
             dist=(loc[:, :, None, :] - loc[:, None, :, :]).norm(p=2, dim=-1),
             ids=torch.arange(batch_size, dtype=torch.int64, device=loc.device)[:, None],  # Add steps dimension
             first_a=prev_a,
@@ -58,6 +71,7 @@ class StateTSPTW(NamedTuple):
                 if visited_dtype == torch.uint8
                 else torch.zeros(batch_size, 1, (n_loc + 63) // 64, dtype=torch.int64, device=loc.device)  # Ceil
             ),
+            # TODO: For task 1 add masks of constraint-infeasible nodes
             lengths=torch.zeros(batch_size, 1, device=loc.device),
             cur_coord=None,
             i=torch.zeros(1, dtype=torch.int64, device=loc.device)  # Vector with length num_steps
