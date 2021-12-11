@@ -113,6 +113,7 @@ class StateTSPTW(NamedTuple):
 
     def all_finished(self):
         # Exactly n steps
+        # TODO: may need to add another termination criteria: if all nodes are masked
         return self.i.item() >= self.loc.size(-2)
 
     def get_current_node(self):

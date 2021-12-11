@@ -2,6 +2,7 @@ from torch.utils.data import Dataset
 import torch
 import os
 import pickle
+import numpy as np
 from problems.tsp.state_tsp import StateTSP
 from problems.tsp.state_tsptw import StateTSPTW
 from utils.beam_search import beam_search
@@ -82,7 +83,21 @@ class TSPTW(object):
     NAME = 'tsptw'
 
     @staticmethod
-    def get_costs(dataset, pi):
+    def _get_penalty(tw_lb_sorted, tw_ub_sorted, pair_dist):
+        LAMBDA = 1
+        cur_time = 0
+        penalty = 0
+        for i in range(len(pair_dist)):
+            penalty += max(0, cur_time - tw_ub_sorted[i])
+            cur_time += pair_dist[i]
+            if cur_time < tw_lb_sorted[i + 1]:
+                cur_time = tw_lb_sorted[i + 1]
+        penalty += max(0, cur_time - tw_ub_sorted[-1])
+        cost = cur_time + LAMBDA * penalty
+        return cost, cur_time, penalty
+
+    @classmethod
+    def get_costs(cls, dataset, pi):
         # Check that tours are valid, i.e. contain 0 to n -1
         assert (
                 torch.arange(pi.size(1), out=pi.data.new()).view(1, -1).expand_as(pi) ==
@@ -90,10 +105,30 @@ class TSPTW(object):
         ).all(), "Invalid tour"
 
         # Gather dataset in order of tour
-        d = dataset.gather(1, pi.unsqueeze(-1).expand_as(dataset))
+        loc = dataset['loc']
+        d = loc.gather(1, pi[..., None].expand(*pi.size(), loc.size(-1)))
 
         # Length is distance (L2-norm of difference) from each next location from its prev and of last from first
-        return (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2).sum(1) + (d[:, 0] - d[:, -1]).norm(p=2, dim=1), None
+        # obj_dist = (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2).sum(1) + (d[:, 0] - d[:, -1]).norm(p=2, dim=1)
+
+        tw_lb, tw_ub = dataset['tw_lb'].unsqueeze(-1), dataset['tw_ub'].unsqueeze(-1)
+        tw_lb_sorted = tw_lb.gather(1, pi[..., None].expand(*pi.size(), tw_lb.size(-1)))
+        tw_ub_sorted = tw_ub.gather(1, pi[..., None].expand(*pi.size(), tw_ub.size(-1)))
+        pair_dist = (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2)
+        tw_lb_sorted = tw_lb_sorted.squeeze(2).cpu().detach().numpy()
+        tw_ub_sorted = tw_ub_sorted.squeeze(2).cpu().detach().numpy()
+        pair_dist = pair_dist.cpu().detach().numpy()
+        assert tw_lb_sorted.shape[1] == tw_ub_sorted.shape[1] == pair_dist.shape[1] + 1
+        costs, dists, penalties = [], [], []
+        for i in range(pair_dist.shape[0]):
+            cost, dist, penalty = cls._get_penalty(tw_lb_sorted[i], tw_ub_sorted[i], pair_dist[i])
+            costs.append(cost)
+            dists.append(dist)
+            penalties.append(penalty)
+        costs = torch.from_numpy(np.array(costs)).cuda()
+        dists = torch.from_numpy(np.array(dists)).cuda()
+        penalties = torch.from_numpy(np.array(penalties)).cuda()
+        return costs, dists, penalties, None
 
     @staticmethod
     def make_dataset(*args, **kwargs):
@@ -134,9 +169,10 @@ def make_instance(args):
 
 
 def generate_instance(size):
+    # 20 * np.sqrt(2) = 28.3
     loc = torch.FloatTensor(size, 2).uniform_(0, 1)
-    tw_center = torch.FloatTensor(size).uniform_(0, 1)
-    tw_width = torch.FloatTensor(size).uniform_(1e-3, 0.5)
+    tw_center = torch.FloatTensor(size).uniform_(0, 15)
+    tw_width = torch.FloatTensor(size).uniform_(1e-3, 15)
     tw_lb = tw_center - tw_width
     tw_lb[tw_lb < 0] = 0
     tw_ub = tw_center + tw_width
