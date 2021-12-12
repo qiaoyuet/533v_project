@@ -83,8 +83,7 @@ class TSPTW(object):
     NAME = 'tsptw'
 
     @staticmethod
-    def _get_penalty(tw_lb_sorted, tw_ub_sorted, pair_dist):
-        LAMBDA = 1
+    def _get_penalty(tw_lb_sorted, tw_ub_sorted, pair_dist, lam):
         cur_time = 0
         penalty = 0
         for i in range(len(pair_dist)):
@@ -93,11 +92,15 @@ class TSPTW(object):
             if cur_time < tw_lb_sorted[i + 1]:
                 cur_time = tw_lb_sorted[i + 1]
         penalty += max(0, cur_time - tw_ub_sorted[-1])
-        cost = cur_time + LAMBDA * penalty
+        cost = cur_time + lam * penalty
         return cost, cur_time, penalty
 
+    @staticmethod
+    def lam_scheduler(lam):
+        pass
+
     @classmethod
-    def get_costs(cls, dataset, pi):
+    def get_costs(cls, dataset, pi, lam):
         # Check that tours are valid, i.e. contain 0 to n -1
         assert (
                 torch.arange(pi.size(1), out=pi.data.new()).view(1, -1).expand_as(pi) ==
@@ -121,7 +124,7 @@ class TSPTW(object):
         assert tw_lb_sorted.shape[1] == tw_ub_sorted.shape[1] == pair_dist.shape[1] + 1
         costs, dists, penalties = [], [], []
         for i in range(pair_dist.shape[0]):
-            cost, dist, penalty = cls._get_penalty(tw_lb_sorted[i], tw_ub_sorted[i], pair_dist[i])
+            cost, dist, penalty = cls._get_penalty(tw_lb_sorted[i], tw_ub_sorted[i], pair_dist[i], lam)
             costs.append(cost)
             dists.append(dist)
             penalties.append(penalty)

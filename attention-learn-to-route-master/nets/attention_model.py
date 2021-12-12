@@ -52,7 +52,8 @@ class AttentionModel(nn.Module):
                  normalization='batch',
                  n_heads=8,
                  checkpoint_encoder=False,
-                 shrink_size=None):
+                 shrink_size=None
+                 ):
         super(AttentionModel, self).__init__()
 
         self.embedding_dim = embedding_dim
@@ -129,7 +130,7 @@ class AttentionModel(nn.Module):
         if temp is not None:  # Do not change temperature if not provided
             self.temp = temp
 
-    def forward(self, input, return_pi=False):
+    def forward(self, input, lam, return_pi=False):
         """
         :param input: (batch_size, graph_size, node_dim) input node features or dictionary with multiple tensors
         :param return_pi: whether to return the output sequences, this is optional as it is not compatible with
@@ -144,14 +145,14 @@ class AttentionModel(nn.Module):
 
         _log_p, pi = self._inner(input, embeddings)
 
-        cost, _, _, mask = self.problem.get_costs(input, pi)  # FIXME
+        cost, dists, penalties, mask = self.problem.get_costs(input, pi, lam=lam)
         # Log likelyhood is calculated within the model since returning it per action does not work well with
         # DataParallel since sequences can be of different lengths
         ll = self._calc_log_likelihood(_log_p, pi, mask)  # FIXME
         if return_pi:
             return cost, ll, pi
 
-        return cost, ll
+        return cost, dists, penalties, ll
 
     def beam_search(self, *args, **kwargs):
         return self.problem.beam_search(*args, **kwargs, model=self)

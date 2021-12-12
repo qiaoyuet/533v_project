@@ -71,6 +71,11 @@ def get_options(args=None):
     parser.add_argument('--no_tensorboard', action='store_true', help='Disable logging TensorBoard files')
     parser.add_argument('--no_progress_bar', action='store_true', help='Disable progress bar')
 
+    # TW
+    parser.add_argument('--lam', type=float)
+    parser.add_argument('--lr_lam', type=float)
+    parser.add_argument('--fix_lam', action='store_true')
+
     opts = parser.parse_args(args)
 
     opts.use_cuda = torch.cuda.is_available() and not opts.no_cuda

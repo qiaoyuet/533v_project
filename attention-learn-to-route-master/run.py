@@ -154,18 +154,16 @@ def run(opts):
     if opts.eval_only:
         validate(model, val_dataset, opts)
     else:
-        for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
-            train_epoch(
-                model,
-                optimizer,
-                baseline,
-                lr_scheduler,
-                epoch,
-                val_dataset,
-                problem,
-                tb_logger,
-                opts
-            )
+        train_epoch(
+            model,
+            optimizer,
+            baseline,
+            lr_scheduler,
+            val_dataset,
+            problem,
+            tb_logger,
+            opts,
+        )
 
 
 if __name__ == "__main__":

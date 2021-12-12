@@ -34,7 +34,7 @@ def rollout(model, dataset, opts):
 
     def eval_model_bat(bat):
         with torch.no_grad():
-            cost, _ = model(move_to(bat, opts.device))
+            cost, _, _, _ = model(move_to(bat, opts.device), lam=1)
         return cost.data.cpu()
 
     return torch.cat([
@@ -64,64 +64,73 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
     return grad_norms, grad_norms_clipped
 
 
-def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, problem, tb_logger, opts):
-    print("Start train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))
-    step = epoch * (opts.epoch_size // opts.batch_size)
-    start_time = time.time()
+def train_epoch(model, optimizer, baseline, lr_scheduler, val_dataset, problem, tb_logger, opts):
 
-    if not opts.no_tensorboard:
-        tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
+    lam = opts.lam
 
-    # Generate new training data for each epoch
-    training_dataset = baseline.wrap_dataset(problem.make_dataset(
-        size=opts.graph_size, num_samples=opts.epoch_size, distribution=opts.data_distribution))
-    training_dataloader = DataLoader(training_dataset, batch_size=opts.batch_size, num_workers=1)
+    for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
 
-    # Put model in train mode!
-    model.train()
-    set_decode_type(model, "sampling")
+        print("Start train epoch {}, lr={} for run {}".format(epoch, optimizer.param_groups[0]['lr'], opts.run_name))
+        step = epoch * (opts.epoch_size // opts.batch_size)
+        start_time = time.time()
 
-    for batch_id, batch in enumerate(tqdm(training_dataloader, disable=opts.no_progress_bar)):
+        if not opts.no_tensorboard:
+            tb_logger.log_value('learnrate_pg0', optimizer.param_groups[0]['lr'], step)
 
-        train_batch(
-            model,
-            optimizer,
-            baseline,
-            epoch,
-            batch_id,
-            step,
-            batch,
-            tb_logger,
-            opts
-        )
+        # Generate new training data for each epoch
+        training_dataset = baseline.wrap_dataset(problem.make_dataset(
+            size=opts.graph_size, num_samples=opts.epoch_size, distribution=opts.data_distribution))
+        training_dataloader = DataLoader(training_dataset, batch_size=opts.batch_size, num_workers=1)
 
-        step += 1
+        # Put model in train mode!
+        model.train()
+        set_decode_type(model, "sampling")
 
-    epoch_duration = time.time() - start_time
-    print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
+        for batch_id, batch in enumerate(tqdm(training_dataloader, disable=opts.no_progress_bar)):
 
-    if (opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0) or epoch == opts.n_epochs - 1:
-        print('Saving model and state...')
-        torch.save(
-            {
-                'model': get_inner_model(model).state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'rng_state': torch.get_rng_state(),
-                'cuda_rng_state': torch.cuda.get_rng_state_all(),
-                'baseline': baseline.state_dict()
-            },
-            os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch))
-        )
+            avg_pen = train_batch(
+                model,
+                optimizer,
+                baseline,
+                epoch,
+                batch_id,
+                step,
+                batch,
+                tb_logger,
+                opts,
+                lam
+            )
 
-    avg_reward = validate(model, val_dataset, opts)
+            step += 1
 
-    if not opts.no_tensorboard:
-        tb_logger.log_value('val_avg_reward', avg_reward, step)
+            if not opts.fix_lam:
+                lam += opts.lr_lam * avg_pen
 
-    baseline.epoch_callback(model, epoch)
+        epoch_duration = time.time() - start_time
+        print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
 
-    # lr_scheduler should be called at end of epoch
-    lr_scheduler.step()
+        if (opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0) or epoch == opts.n_epochs - 1:
+            print('Saving model and state...')
+            torch.save(
+                {
+                    'model': get_inner_model(model).state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'rng_state': torch.get_rng_state(),
+                    'cuda_rng_state': torch.cuda.get_rng_state_all(),
+                    'baseline': baseline.state_dict()
+                },
+                os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch))
+            )
+
+        avg_reward = validate(model, val_dataset, opts)
+
+        if not opts.no_tensorboard:
+            tb_logger.log_value('val_avg_reward', avg_reward, step)
+
+        baseline.epoch_callback(model, epoch)
+
+        # lr_scheduler should be called at end of epoch
+        lr_scheduler.step()
 
 
 def train_batch(
@@ -133,14 +142,15 @@ def train_batch(
         step,
         batch,
         tb_logger,
-        opts
+        opts,
+        lam
 ):
     x, bl_val = baseline.unwrap_batch(batch)
     x = move_to(x, opts.device)
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
     # Evaluate model, get costs and log probabilities
-    cost, log_likelihood = model(x)
+    cost, dists, penalties, log_likelihood = model(x, lam)
 
     # Evaluate baseline, get baseline loss if any (only for critic)
     bl_val, bl_loss = baseline.eval(x, cost) if bl_val is None else (bl_val, 0)
@@ -158,5 +168,7 @@ def train_batch(
 
     # Logging
     if step % int(opts.log_step) == 0:
-        log_values(cost, grad_norms, epoch, batch_id, step,
+        log_values(cost, dists, penalties, lam, grad_norms, epoch, batch_id, step,
                    log_likelihood, reinforce_loss, bl_loss, tb_logger, opts)
+
+    return penalties.mean().item()
