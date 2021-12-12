@@ -3,6 +3,7 @@ import time
 from tqdm import tqdm
 import torch
 import math
+import random
 
 from torch.utils.data import DataLoader
 from torch.nn import DataParallel
@@ -64,7 +65,7 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
     return grad_norms, grad_norms_clipped
 
 
-def train_epoch(model, optimizer, baseline, lr_scheduler, val_dataset, problem, tb_logger, opts):
+def train_epoch(model, optimizer, baseline, lr_scheduler, val_dataset, problem, tb_logger, opts, result_path):
 
     lam = opts.lam
 
@@ -98,7 +99,8 @@ def train_epoch(model, optimizer, baseline, lr_scheduler, val_dataset, problem, 
                 batch,
                 tb_logger,
                 opts,
-                lam
+                lam,
+                result_path
             )
 
             step += 1
@@ -143,7 +145,8 @@ def train_batch(
         batch,
         tb_logger,
         opts,
-        lam
+        lam,
+        result_path
 ):
     x, bl_val = baseline.unwrap_batch(batch)
     x = move_to(x, opts.device)
@@ -169,6 +172,6 @@ def train_batch(
     # Logging
     if step % int(opts.log_step) == 0:
         log_values(cost, dists, penalties, lam, grad_norms, epoch, batch_id, step,
-                   log_likelihood, reinforce_loss, bl_loss, tb_logger, opts)
+                   log_likelihood, reinforce_loss, bl_loss, tb_logger, opts, result_path)
 
     return penalties.mean().item()

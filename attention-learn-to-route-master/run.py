@@ -3,6 +3,8 @@
 import os
 import json
 import pprint as pp
+import time
+import random
 
 import torch
 import torch.optim as optim
@@ -18,6 +20,12 @@ from utils import torch_load_cpu, load_problem
 
 
 def run(opts):
+    timestamp = time.strftime('%b-%d-%Y-%H%M', time.localtime())
+    folder_name = "{}-{}".format(timestamp, random.randint(0, 1000))
+    print('* Results writing to: {}'.format(folder_name))
+    result_path = os.path.join(opts.log_dir, folder_name)
+    if not os.path.exists(result_path):
+        os.makedirs(result_path)
 
     # Pretty print the run args
     pp.pprint(vars(opts))
@@ -163,6 +171,7 @@ def run(opts):
             problem,
             tb_logger,
             opts,
+            result_path
         )
 
 
