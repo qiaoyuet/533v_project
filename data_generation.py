@@ -89,7 +89,8 @@ for i in range(data_num):
     
 import h5py 
 
-h5Path = r'../data/data1.h5'
+print("---Start---")
+h5Path = r'data1.h5'
 
 with h5py.File(h5Path, "a") as f:   
     loc_set = f.create_dataset('mydataset', (data_num, city_num, 2))
